@@ -1,0 +1,40 @@
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+**/.env
+**/.env.*
+# Allow example files (no values, safe to commit)
+!.env.example
+!**/.env.example
+
+# ── Private local folder ──────────────────────────────────────────────────────
+_private/
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+.next/
+dist/
+build/
+out/
+
+# ── Python venvs ──────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# ── OS cruft ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "rootDirectory": "dashboard",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "env": {
+    "DEMO_MODE": "true"
+  }
+}
