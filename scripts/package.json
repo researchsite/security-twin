@@ -1,0 +1,19 @@
+{
+  "name": "@security-twin/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:all":        "node test-all.mjs",
+    "test:clickhouse": "node test-clickhouse.mjs",
+    "test:mongodb":    "node test-mongodb.mjs",
+    "test:openai":     "node test-openai.mjs",
+    "test:github":     "node test-github.mjs"
+  },
+  "dependencies": {
+    "@clickhouse/client": "^1.8.0",
+    "@octokit/rest":      "^21.0.0",
+    "mongodb":            "^6.8.0",
+    "openai":             "^4.52.0"
+  }
+}
