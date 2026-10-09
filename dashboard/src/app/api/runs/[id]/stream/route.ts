@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import * as fs from "fs";
+import * as http from "http";
 import * as path from "path";
 
 const DEMO_MODE = process.env.DEMO_MODE !== "false";
@@ -19,25 +20,41 @@ export async function GET(
     return streamDemoRun();
   }
 
-  // Live: proxy SSE from orchestrator
-  try {
-    const upstream = await fetch(`${ORCHESTRATOR_URL}/api/runs/${id}/stream`, {
-      signal: req.signal,
-    });
-    if (!upstream.body) {
-      return new Response("no body", { status: 502 });
-    }
-    return new Response(upstream.body, {
-      headers: {
-        "Content-Type":       "text/event-stream",
-        "Cache-Control":      "no-cache",
-        "X-Accel-Buffering":  "no",
-        "Connection":         "keep-alive",
-      },
-    });
-  } catch {
-    return new Response("orchestrator unreachable", { status: 502 });
-  }
+  // Live: proxy SSE from orchestrator using Node.js http.request
+  // fetch/undici does not reliably flush streaming responses in Next.js dev mode
+  const orchUrl = new URL(`${ORCHESTRATOR_URL}/api/runs/${id}/stream`);
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const upstreamReq = http.request(
+        {
+          hostname: orchUrl.hostname,
+          port:     parseInt(orchUrl.port || "80", 10),
+          path:     orchUrl.pathname,
+          method:   "GET",
+          headers:  { Accept: "text/event-stream" },
+        },
+        (res) => {
+          res.on("data",  (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+          res.on("end",   () => controller.close());
+          res.on("error", () => controller.close());
+        }
+      );
+      upstreamReq.on("error", () => controller.close());
+      upstreamReq.end();
+      // Clean up when client disconnects
+      req.signal.addEventListener("abort", () => upstreamReq.destroy());
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type":       "text/event-stream",
+      "Cache-Control":      "no-cache",
+      "X-Accel-Buffering":  "no",
+      "Connection":         "keep-alive",
+    },
+  });
 }
 
 function streamDemoRun(): Response {

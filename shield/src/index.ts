@@ -8,7 +8,8 @@ import {
   flagSession,
   getSession,
 } from "./session";
-import { enqueueEvent } from "./sink";
+import { enqueueEvent, setSink } from "./sink";
+import { createClickHouseSink } from "./ch-sink";
 import type { ShieldEvent, Confession } from "./types";
 import {
   injectIntoJson,
@@ -99,14 +100,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const ua = req.headers["user-agent"] ?? "";
   const sessionId = computeSessionId(ip, ua);
 
-  // run_id: env default, overridable per-request via query param
+  // run_id: query param takes priority, then x-run-id header, then env default
   let runId = DEFAULT_RUN;
   if (typeof req.query.run_id === "string" && req.query.run_id) {
     runId = req.query.run_id;
-    // Strip from URL so upstream never sees it
     const url = new URL(req.url!, "http://x");
     url.searchParams.delete("run_id");
     req.url = url.pathname + (url.search === "?" ? "" : url.search);
+  } else if (typeof req.headers["x-run-id"] === "string" && req.headers["x-run-id"]) {
+    runId = req.headers["x-run-id"];
   }
 
   (req as Request & { _sm: ShieldMeta })._sm = {
@@ -140,6 +142,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 
   next();
+});
+
+// ── Confessions export (used by orchestrator remember stage) ──────────────────
+
+app.get("/confessions", (_req: Request, res: Response) => {
+  res.json(confessions);
 });
 
 // ── Decoy routes ───────────────────────────────────────────────────────────────
@@ -203,8 +211,27 @@ app.use(
 
 // ── Start ──────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`[SHIELD] run=${DEFAULT_RUN}`);
-  console.log(`[SHIELD] :${PORT}  →  ${TWIN_URL}`);
-  console.log(`[SHIELD] decoys: /admin-backup  /api/internal/export  /api/v0/debug`);
+async function start(): Promise<void> {
+  try {
+    const chSink = await createClickHouseSink();
+    if (chSink) {
+      setSink(chSink);
+      console.log("[SHIELD] ClickHouse sink active");
+    } else {
+      console.log("[SHIELD] CLICKHOUSE_URL not set — using memory sink");
+    }
+  } catch (err) {
+    console.error("[SHIELD] ClickHouse unavailable — using memory sink:", (err as Error).message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`[SHIELD] run=${DEFAULT_RUN}`);
+    console.log(`[SHIELD] :${PORT}  →  ${TWIN_URL}`);
+    console.log(`[SHIELD] decoys: /admin-backup  /api/internal/export  /api/v0/debug`);
+  });
+}
+
+start().catch((err: Error) => {
+  console.error("[SHIELD] startup failed:", err.message);
+  process.exit(1);
 });

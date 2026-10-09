@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "reset":           "node reset-run.mjs",
+    "reset:run":       "node reset-run.mjs --run-id",
     "test:all":        "node test-all.mjs",
     "test:clickhouse": "node test-clickhouse.mjs",
     "test:mongodb":    "node test-mongodb.mjs",

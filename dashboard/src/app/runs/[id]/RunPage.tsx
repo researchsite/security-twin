@@ -139,7 +139,10 @@ export function RunPage({ runId, demoMode }: Props) {
 
         case "run_done":
           setRunDone(true);
-          setAborted(!!(ev.data as { aborted?: boolean })?.aborted);
+          setAborted(!!(ev.data as { aborted?: boolean; missing?: boolean })?.aborted);
+          if ((ev.data as { missing?: boolean })?.missing) {
+            // Run no longer in orchestrator memory (restarted) — nothing to replay
+          }
           break;
       }
     };

@@ -331,6 +331,19 @@ async function run(ctx: StageContext): Promise<StageResult> {
     (mapResult?.data as { source_file?: string } | undefined)?.source_file ??
     path.join(ctx.work_dir, "demo-app", "src", "index.ts");
 
+  // ISOLATION GUARD: refuse to write anything outside the per-run work dir.
+  // This is a hard stop — not a fallback — so a misbehaving map stage can
+  // never cause the fix to overwrite the repo's own demo-app/ source.
+  const resolvedSource = path.resolve(sourceFile);
+  const resolvedWork   = path.resolve(ctx.work_dir);
+  if (!resolvedSource.startsWith(resolvedWork + path.sep) &&
+       resolvedSource !== resolvedWork) {
+    throw new Error(
+      `ISOLATION VIOLATION: sourceFile "${resolvedSource}" is outside work_dir "${resolvedWork}". ` +
+      `Refusing to write. Check the map stage.`
+    );
+  }
+
   const score_before: number =
     (scanResult?.data as { score_before?: number } | undefined)?.score_before ?? 1;
 
@@ -502,6 +515,7 @@ async function run(ctx: StageContext): Promise<StageResult> {
     ({ patched, patch: finalPatch } = applySignatureChangeFix(source));
   }
 
+  ctx.emit({ type: "log", stage: "fix", message: `WRITE → ${sourceFile}` });
   await fs.writeFile(sourceFile, patched, "utf8");
 
   // ── 7. Restart twin with patched source ────────────────────────────────────

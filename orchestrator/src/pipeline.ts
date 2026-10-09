@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as memory from "./memory";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,10 +59,16 @@ function getOrCreate(run_id: string): RunEntry {
   return runs.get(run_id)!;
 }
 
-/** Subscribe to SSE events for a run. Replays buffered events first. */
+/** Subscribe to SSE events for a run. Replays buffered events first.
+ *  If the run is not in memory (e.g. after restart), immediately sends
+ *  a synthetic run_done so the dashboard doesn't wait forever. */
 export function subscribe(run_id: string, handler: (e: PipelineEvent) => void): void {
-  const entry = getOrCreate(run_id);
-  // Replay history
+  if (!runs.has(run_id)) {
+    // Run not in memory — emit a terminal marker so the client knows
+    handler({ type: "run_done", ts: Date.now(), data: { missing: true } });
+    return;
+  }
+  const entry = runs.get(run_id)!;
   for (const ev of entry.events) handler(ev);
   entry.emitter.on("event", handler);
 }
@@ -129,6 +136,14 @@ export async function startRun(run_id: string, stages: StageDef[]): Promise<void
 
   entry.state = "done";
   emit({ type: "run_done", data: { stages: Object.keys(ctx.results) } });
+
+  // ── Persist full run to MongoDB (all 13 stages) ────────────────────────────
+  await memory.saveRun({
+    _id:         run_id,
+    stages:      ctx.results,
+    started_at:  new Date(ctx.started_at),
+    finished_at: new Date(),
+  }).catch((e: Error) => console.error(`[ORCH] mongo saveRun failed: ${e.message}`));
 
   // ── Demo recorder ─────────────────────────────────────────────────────────
   // When RECORD_DEMO_RUN=true, write the full event stream to

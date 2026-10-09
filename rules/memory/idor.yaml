@@ -1,0 +1,25 @@
+rules:
+  - id: idor-kit-no-owner-check
+    pattern: getKit($ID)
+    message: |
+      IDOR (CWE-639): kit fetched without authorization check.
+      Any caller who knows (or guesses) $ID can read another user's kit token.
+
+      Fix option 1 — preferred, no contract change (in-handler ownership check):
+        const kit = getKit($ID);
+        if (!kit || kit.ownerId !== currentUser(req)) return res.status(404).json({ error: "not found" });
+
+      Fix option 2 — signature change (replaces call site, changes public contract):
+        const kit = getKitForUser($ID, currentUser(req));
+        // Only use when ALL callers have a user in scope and the change is audited.
+
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      cwe: "CWE-639"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      category: security
+      technology: [typescript, express]
+      invariant: "every kit read must be authorized against the current user (in-handler ownerId check or getKitForUser)"
+      fix_snippet: "if (!kit || kit.ownerId !== currentUser(req)) return res.status(404).json({ error: \"not found\" });"
