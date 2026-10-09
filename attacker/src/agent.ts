@@ -18,16 +18,27 @@ import type { ChatCompletionTool, ChatCompletionMessageParam } from "openai/reso
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
-const SHIELD_URL   = (process.env.SHIELD_URL       ?? "http://localhost:8080").replace(/\/$/, "");
-const ORCH_URL     = (process.env.ORCHESTRATOR_URL ?? "http://localhost:4001").replace(/\/$/, "");
-const RUN_ID       = process.env.RUN_ID ?? `agent-${Date.now()}`;
-const MODEL        = process.env.ATTACKER_MODEL ?? "gpt-4o";
-const BASE_URL     = process.env.ATTACKER_BASE_URL;             // AkashML / Nebius / etc.
-const API_KEY      =
-  process.env.ATTACKER_API_KEY ??
-  process.env.AKASHML_API_KEY  ??
-  process.env.OPENAI_API_KEY   ??
-  "";
+const SHIELD_URL = (process.env.SHIELD_URL       ?? "http://localhost:8080").replace(/\/$/, "");
+const ORCH_URL   = (process.env.ORCHESTRATOR_URL ?? "http://localhost:4001").replace(/\/$/, "");
+const RUN_ID     = process.env.RUN_ID ?? `agent-${Date.now()}`;
+
+// Provider config — flip LLM_PROVIDER=akash to use AkashML, everything else stays identical.
+// "openai" uses the Responses API (stateful); "akash" (and any custom BASE_URL) uses Chat Completions.
+const PROVIDER = ((process.env.LLM_PROVIDER ?? "openai").toLowerCase()) as "openai" | "akash" | string;
+const AKASH_BASE_URL = "https://api.akashml.com/v1";
+
+const MODEL    = process.env.ATTACKER_MODEL ?? (PROVIDER === "akash" ? "meta-llama/Llama-3.3-70B-Instruct" : "gpt-4o");
+const BASE_URL = PROVIDER === "akash"
+  ? AKASH_BASE_URL
+  : (process.env.ATTACKER_BASE_URL ?? undefined);   // Nebius / custom compat providers
+const API_KEY  = PROVIDER === "akash"
+  ? (process.env.AKASHML_API_KEY ?? "")
+  : (process.env.ATTACKER_API_KEY ?? process.env.OPENAI_API_KEY ?? "");
+
+// Warn early — key missing means getClient() will throw on first LLM call.
+if (PROVIDER === "akash" && !process.env.AKASHML_API_KEY) {
+  process.stderr.write("[agent] WARNING: AKASHML_API_KEY not set — set it in .env.local or the run will fail\n");
+}
 
 const MAX_REQUESTS = 40;   // hard budget per run
 const RATE_MS      = 300;  // minimum ms between HTTP calls
@@ -391,10 +402,17 @@ function saveRecording(): void {
 async function main(): Promise<void> {
   if (DRY) { await runDry(); return; }
 
-  process.stderr.write(
-    `[agent] run=${RUN_ID} model=${MODEL} api=${USE_RESPONSES ? "responses" : "chat-completions"}\n`
-  );
-  process.stderr.write(`[agent] target=${SHIELD_URL}  budget=${MAX_REQUESTS}req @ 1/${RATE_MS}ms\n`);
+  const apiMode = USE_RESPONSES ? "responses" : "chat-completions";
+  process.stderr.write(`[agent] provider=${PROVIDER}  model=${MODEL}  api=${apiMode}\n`);
+  process.stderr.write(`[agent] run=${RUN_ID}  target=${SHIELD_URL}  budget=${MAX_REQUESTS}req @ 1/${RATE_MS}ms\n`);
+
+  // Emit as first SSE event so the provider/model are visible on the dashboard for judges.
+  logStep("reasoning", {
+    event:    "agent_start",
+    provider: PROVIDER,
+    model:    MODEL,
+    api:      apiMode,
+  });
 
   if (USE_RESPONSES) {
     await runWithResponsesApi();
