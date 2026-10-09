@@ -3,8 +3,15 @@ rules:
     message: >
       `getKit(id)` returns a kit with NO owner check — any authenticated user can
       read any other user's kit (IDOR / CWE-639 / OWASP A01:2021).
-      Use `getKitForUser(id, userId)` instead, which validates ownership before
-      returning the resource.
+
+      Preferred fix (no contract change): after fetching, add an in-handler guard —
+        if (!kit || kit.ownerId !== currentUser(req)) return res.status(404).json({ error: "not found" });
+      This leaves getKit's signature untouched and fixes the IDOR with zero blast radius.
+
+      Alternative fix (signature change): replace the call site with
+        getKitForUser(id, userId)
+      Only use when every caller of getKit has a user value in scope and the change
+      has been audited across all call sites.
     severity: ERROR
     languages: [typescript, javascript]
     metadata:
@@ -12,7 +19,7 @@ rules:
       owasp: "A01:2021 – Broken Access Control"
       confidence: HIGH
       category: security
+      invariant: "every kit read must be authorized against the current user"
     patterns:
       - pattern: getKit($ID)
       - pattern-not: getKit($ID, ...)
-    fix: getKitForUser($ID, userId)

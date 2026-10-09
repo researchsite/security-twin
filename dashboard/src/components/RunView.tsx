@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { RunSummary, AttackEvent } from "@/lib/types";
+import { useState } from "react";
+import type { RunSummary } from "@/lib/types";
 import { EventRow } from "./EventRow";
 import { LaunchButton } from "./LaunchButton";
+import { CHAnalyticsPanel } from "./CHAnalyticsPanel";
 
 interface RunViewProps {
   initialRun: RunSummary | null;
@@ -43,6 +44,9 @@ export function RunView({ initialRun, demoMode }: RunViewProps) {
           </div>
         </div>
       )}
+
+      {/* ClickHouse analytics — live mode only */}
+      {!demoMode && run && <CHAnalyticsPanel runId={run.runId} />}
 
       {/* Launch button — only rendered when not demo mode */}
       {!demoMode && <LaunchButton onRunStart={setRun} />}

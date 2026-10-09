@@ -1,0 +1,7 @@
+name = "security-twin-alert"
+call_direction = "outbound"
+
+# Fill in project_id and org_id from your Guava dashboard before running `guava deploy`.
+# For local development, only GUAVA_API_KEY and GUAVA_AGENT_NUMBER env vars are required.
+# project_id = "gp-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# org_id     = "xxxxxxxxxxxxxxxxxxxxxxxx"

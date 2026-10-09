@@ -1,0 +1,156 @@
+name: Twin Gate
+
+on:
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+# ── What this workflow does ───────────────────────────────────────────────────
+#
+# 1. Semgrep auto  — scans demo-app/src/ with Semgrep's auto rule-set.
+#                    Informational only; findings are annotated but do NOT block.
+#
+# 2. Semgrep memory — scans demo-app/src/ with every rule in rules/memory/.
+#                    ZERO TOLERANCE: any match fails the PR with a direct link
+#                    to the incident (SEC-001) and the invariant that was
+#                    violated.  This enforces "the same attack can't work twice."
+#
+# 3. Plumber       — runs `plumber scan . --min-score B` (optional, non-blocking).
+#                    Install the plumber CLI in your runner environment to enable.
+#
+# Semgrep runs via the official semgrep/semgrep Docker image so no local install
+# is required.
+
+jobs:
+  # ── Semgrep ──────────────────────────────────────────────────────────────────
+  semgrep:
+    name: "Semgrep (auto + memory rules)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── 1. Auto rules — informational, never blocks a PR ───────────────────
+      - name: "Semgrep — auto rules (informational)"
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            --workdir /src \
+            semgrep/semgrep:latest \
+            semgrep scan --config auto demo-app/src/ \
+              --json --output /src/semgrep-auto.json \
+              --quiet \
+            || true   # exit 1 on findings is expected; we parse below
+
+          python3 - <<'PYEOF'
+          import json, sys
+          try:
+              data = json.load(open("semgrep-auto.json"))
+          except Exception:
+              print("::warning::Could not parse Semgrep auto output")
+              sys.exit(0)
+          findings = data.get("results", [])
+          print(f"Semgrep auto: {len(findings)} finding(s) (informational)")
+          for f in findings:
+              path = f.get("path", "")
+              line = f.get("start", {}).get("line", 1)
+              rule = f.get("check_id", "")
+              msg  = f.get("extra", {}).get("message", "")[:120]
+              print(f"::notice file={path},line={line}::[auto] {rule}: {msg}")
+          PYEOF
+
+      # ── 2. Memory rules — BLOCKING ─────────────────────────────────────────
+      #
+      # Any pattern already patched by the Security Twin is an invariant.
+      # Introducing the same vulnerable pattern again is a PR-blocking error.
+      - name: "Semgrep — memory rules (BLOCKING)"
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            --workdir /src \
+            semgrep/semgrep:latest \
+            semgrep scan --config rules/memory/ demo-app/src/ \
+              --json --output /src/semgrep-memory.json \
+              --quiet \
+            || true
+
+          python3 - <<'PYEOF'
+          import json, os, sys
+
+          repo     = os.environ.get("GH_REPO", "")
+          rule_url = f"https://github.com/{repo}/blob/main/rules/memory/SEC-001.yaml"
+
+          try:
+              data = json.load(open("semgrep-memory.json"))
+          except Exception as e:
+              print(f"::error::Could not parse Semgrep memory output: {e}")
+              sys.exit(1)
+
+          findings = data.get("results", [])
+
+          if not findings:
+              print("Semgrep memory rules: ✓ zero matches — PR is safe to merge")
+              sys.exit(0)
+
+          # One annotation per finding
+          for f in findings:
+              path = f.get("path", "")
+              line = f.get("start", {}).get("line", 1)
+              rule = f.get("check_id", "")
+              msg  = f.get("extra", {}).get("message", "")
+              print(f"::error file={path},line={line},title=SEC-001 memory rule violated::{msg}")
+
+          # Summary error linking the incident
+          n = len(findings)
+          print()
+          print(
+              f"::error title=Twin Gate blocked this PR ({n} violation{'s' if n != 1 else ''}):: "
+              f"This PR re-introduces a vulnerability class already patched by the Security Twin "
+              f"(incident SEC-001: IDOR — CWE-639). "
+              f"The memory rule blocks this exact pattern from being re-introduced. "
+              f"Memory rule: {rule_url} "
+              f"Fix: replace getKit(id) with getKitForUser(id, currentUser(req)), "
+              f"or add an in-handler owner check after the fetch."
+          )
+          sys.exit(1)
+          PYEOF
+
+      # ── Upload both result files for review ────────────────────────────────
+      - name: Upload Semgrep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results-${{ github.run_number }}
+          path: |
+            semgrep-auto.json
+            semgrep-memory.json
+          if-no-files-found: ignore
+
+  # ── Plumber ──────────────────────────────────────────────────────────────────
+  plumber:
+    name: "Plumber SAST scan"
+    runs-on: ubuntu-latest
+    # Non-blocking — install the plumber CLI in your runner or self-hosted agent
+    # to enable this gate.  A missing binary is a warning, not a failure.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for plumber CLI
+        id: check_plumber
+        run: |
+          if command -v plumber &>/dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::plumber not found in CI — scan skipped (non-blocking). Install plumber to enforce the --min-score B gate."
+          fi
+
+      - name: "Plumber scan (--min-score B)"
+        if: steps.check_plumber.outputs.found == 'true'
+        run: plumber scan . --min-score B

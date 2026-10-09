@@ -104,20 +104,16 @@ app.get("/api/users", (_req: Request, res: Response) => {
   res.json(USERS);
 });
 
-// INTENTIONAL IDOR — GET /api/kits/:id
+// GET /api/kits/:id — patched by Security Twin (SEC-001)
 //
-// This route is a planted vulnerability for the security-twin demo.
-// It uses getKit(id) which applies NO owner check, so any caller who
-// knows (or guesses) a kit ID can read any other user's kit including
-// their token — regardless of the x-demo-user header value.
-//
-// The secure version would call getKitForUser(id, currentUser(req)).
-// The shield is expected to detect cross-user probes via IDOR rules.
-// The Semgrep rule at rules/memory/SEC-001.yaml flags this pattern.
+// Original vulnerability: getKit(id) with no owner check (IDOR / CWE-639).
+// Fix applied: replaced with getKitForUser(id, currentUser(req)) so only the
+// owning user can access a kit.  SEC-001 memory rule enforces this invariant
+// in CI — any PR that re-introduces getKit(id) will be blocked by twin-gate.
 app.get("/api/kits/:id", (req: Request, res: Response) => {
-  const kit = getKit(req.params.id); // IDOR: no owner check
+  const kit = getKitForUser(req.params.id, currentUser(req)); // SEC-001 fix
   if (!kit) {
-    res.status(404).json({ error: "Kit not found" });
+    res.status(404).json({ error: "not found" });
     return;
   }
   res.json(kit);
