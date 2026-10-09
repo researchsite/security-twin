@@ -10,7 +10,7 @@ loadEnv();
 const TESTS = [
   { name: "ClickHouse", script: "test-clickhouse.mjs", key: "CLICKHOUSE_URL" },
   { name: "MongoDB",    script: "test-mongodb.mjs",    key: "MONGODB_URI" },
-  { name: "OpenAI",     script: "test-openai.mjs",     key: "OPENAI_API_KEY" },
+  { name: "Nebius AI",  script: "test-nebius.mjs",     key: "NEBIUS_API_KEY" },
   { name: "GitHub",     script: "test-github.mjs",     key: "GITHUB_TOKEN" },
 ];
 

@@ -1,5 +1,11 @@
 import { MongoClient } from "mongodb";
+import { setServers } from "dns";
 import { loadEnv, header, test, summary } from "./_env.mjs";
+
+// Node.js uses its own DNS resolver for SRV lookups (not the OS resolver).
+// On Windows the local router often blocks DNS SRV queries, causing ECONNREFUSED.
+// Force Node to use Google's public DNS which supports SRV records.
+setServers(["8.8.8.8", "8.8.4.4"]);
 
 loadEnv();
 

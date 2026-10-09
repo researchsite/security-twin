@@ -1,6 +1,5 @@
 import "dotenv/config";
-import OpenAI from "openai";
-import { generatePayloads } from "./payloads";
+import { buildNebiusClient, generatePayloads } from "./payloads";
 import type { AttackCategory } from "../../orchestrator/src/types";
 
 const SHIELD_URL = process.env.SHIELD_URL ?? "http://localhost:4000";
@@ -19,13 +18,13 @@ const CATEGORIES: AttackCategory[] = [
   "mass_assignment",
 ];
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const nebiusClient = buildNebiusClient();
 
 async function run() {
   console.log(`[ATTACKER] Starting attack run against ${SHIELD_URL}`);
 
   for (const category of CATEGORIES) {
-    const payloads = await generatePayloads(openai, category);
+    const payloads = await generatePayloads(nebiusClient, category);
     for (const payload of payloads) {
       const path = TARGET_PATHS[Math.floor(Math.random() * TARGET_PATHS.length)];
       const start = Date.now();

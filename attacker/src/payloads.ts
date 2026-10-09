@@ -14,16 +14,27 @@ const STATIC_PAYLOADS: Record<AttackCategory, string[]> = {
   mass_assignment: ['{"role":"admin"}', '{"isAdmin":true,"ownerId":"attacker"}'],
 };
 
+export function buildNebiusClient(): OpenAI | null {
+  const apiKey = process.env.NEBIUS_API_KEY;
+  if (!apiKey) return null;
+  return new OpenAI({
+    apiKey,
+    baseURL: process.env.NEBIUS_BASE_URL ?? "https://api.studio.nebius.com/v1/",
+  });
+}
+
 export async function generatePayloads(
-  openai: OpenAI,
+  client: OpenAI | null,
   category: AttackCategory
 ): Promise<string[]> {
-  // Start with static seeds; augment with one LLM-generated variant
   const seeds = STATIC_PAYLOADS[category];
+  if (!client) return seeds;
+
+  const model = process.env.NEBIUS_MODEL ?? "Qwen/Qwen3-30B-A3B-Instruct-2507";
 
   try {
-    const resp = await openai.chat.completions.create({
-      model: "gpt-4.1-nano",
+    const resp = await client.chat.completions.create({
+      model,
       messages: [
         {
           role: "system",
@@ -48,7 +59,6 @@ export async function generatePayloads(
 
     return [...seeds, ...lines];
   } catch {
-    // Fall back to static payloads if OpenAI is unavailable
     return seeds;
   }
 }

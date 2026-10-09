@@ -7,7 +7,7 @@
     "test:all":        "node test-all.mjs",
     "test:clickhouse": "node test-clickhouse.mjs",
     "test:mongodb":    "node test-mongodb.mjs",
-    "test:openai":     "node test-openai.mjs",
+    "test:nebius":     "node test-nebius.mjs",
     "test:github":     "node test-github.mjs"
   },
   "dependencies": {
