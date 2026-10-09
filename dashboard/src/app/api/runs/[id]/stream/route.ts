@@ -5,7 +5,7 @@ import * as path from "path";
 
 const DEMO_MODE = process.env.DEMO_MODE !== "false";
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL ?? "http://localhost:4001";
-export const DEMO_RUN_ID = "demo-2024-idor";
+const DEMO_RUN_ID = "demo-2024-idor";
 
 interface DemoRun { run_id: string; events: unknown[] }
 
