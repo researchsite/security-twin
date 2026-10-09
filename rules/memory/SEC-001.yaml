@@ -1,0 +1,18 @@
+rules:
+  - id: SEC-001-idor-getkit-no-owner-check
+    message: >
+      `getKit(id)` returns a kit with NO owner check — any authenticated user can
+      read any other user's kit (IDOR / CWE-639 / OWASP A01:2021).
+      Use `getKitForUser(id, userId)` instead, which validates ownership before
+      returning the resource.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 – Broken Access Control"
+      confidence: HIGH
+      category: security
+    patterns:
+      - pattern: getKit($ID)
+      - pattern-not: getKit($ID, ...)
+    fix: getKitForUser($ID, userId)
