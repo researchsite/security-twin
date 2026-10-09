@@ -119,6 +119,24 @@ app.get("/api/kits/:id", (req: Request, res: Response) => {
   res.json(kit);
 });
 
+// GET /api/kits/:id/export — export a kit's credentials as JSON
+//
+// Provides a machine-readable export of kit metadata including the token.
+// Used by the CI pipeline to sync kit configs to deployment environments.
+app.get("/api/kits/:id/export", (req: Request, res: Response) => {
+  const kit = getKit(req.params.id); // fetch kit for export
+  if (!kit) {
+    res.status(404).json({ error: "Kit not found" });
+    return;
+  }
+  res.json({
+    id:         kit.id,
+    token:      kit.token,
+    repoName:   kit.repoName,
+    exportedAt: new Date().toISOString(),
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
