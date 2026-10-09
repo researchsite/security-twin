@@ -1,172 +1,276 @@
 # Security Twin
 
-An AI-powered security testing system. Clone this single repo to get everything:
-a sample target app to attack, a reverse-proxy shield that intercepts payloads,
-an LLM-powered attacker that generates them, a shared run-store, and a live
-dashboard deployable to Vercel.
+> An AI red-team that finds, fixes, and remembers — so the same attack can't work twice.
+
+Security teams patch vulnerabilities and move on. Two months later, a new endpoint re-introduces the same pattern. Security Twin breaks the cycle: after a confirmed finding it stores a Semgrep rule in `rules/memory/` and locks it into CI. Any future PR that repeats the pattern is blocked before it ships.
+
+---
+
+## How it works
 
 ```
-attacker/ ──→ shield/ ──→ demo-app/  (or your own app via TWIN_URL)
-                 ↓
-          orchestrator/
-                 ↓
-           dashboard/
+attacker/ ──→ shield/ ──→ demo-app/   (or your own app via TWIN_URL)
+                 │
+                 ▼
+           orchestrator/   13-stage pipeline
+                 │
+                 ▼
+           dashboard/      live SSE stream  →  Vercel
+```
+
+A 13-stage pipeline runs end-to-end:
+
+| # | Stage | What happens |
+|---|-------|-------------|
+| 1 | **clone** | Copy the target app into an isolated work dir |
+| 2 | **scan** | Semgrep + Plumber static analysis baseline |
+| 3 | **attack** | LLM-powered attacker fires payloads through the shield |
+| 4 | **traffic** | Flood the clone to generate realistic request logs in ClickHouse |
+| 5 | **detect** | ClickHouse SQL window query finds IDOR enumeration patterns |
+| 6 | **map** | Locate the exact source file and vulnerable method |
+| 7 | **confirm** | Re-run Semgrep with targeted memory rule to confirm the finding |
+| 8 | **remember** | LLM attacker confesses its objective; persist confession to MongoDB |
+| 9 | **fix** | Analyse blast radius, choose fix type, patch source, restart twin |
+| 10 | **prove** | Re-run IDOR probes against the patched twin; verify 404s |
+| 11 | **sync** | Commit patched file + memory rule + CI workflow to GitHub fork; open PR |
+| 12 | **alert** | Guava outbound phone call to on-call engineer for yes/no approval |
+| 13 | **brief** | LLM summary → ElevenLabs TTS audio brief |
+
+The dashboard streams every event live via SSE. Set `DEMO_MODE=true` to replay `dashboard/public/demo-run.json` with no backend needed.
+
+---
+
+## Monorepo layout
+
+```
+security-twin/
+├── demo-app/          Target app — Express + TypeScript kit store with planted IDOR
+├── shield/            Reverse proxy — inspects, blocks, injects decoys
+├── attacker/          LLM attacker — generates + fires payloads
+├── orchestrator/      Pipeline runner — 13 stages, SSE event bus, MongoDB memory
+├── dashboard/         Next.js dashboard — live run page, memory page, audio brief
+├── rules/
+│   └── memory/        Semgrep rules written by the twin after each confirmed finding
+│       └── SEC-001.yaml  IDOR kit-read without owner check (CWE-639)
+├── scripts/           start-all.sh / stop-all.sh / demo.sh / status.sh
+├── .github/
+│   └── workflows/
+│       └── twin-gate.yml  PR gate: Semgrep auto (info) + memory rules (blocking)
+└── _private/          Local-only files — git-ignored
 ```
 
 ---
 
-## Monorepo structure
+## Each tool's role
 
-| Folder | Description |
-|--------|-------------|
-| `demo-app/` | Minimal Express + TypeScript API — the bundled sample target app. Contains a kit store with 6 fake kits owned by alice, bob, and carol, and a planted IDOR vulnerability on `GET /api/kits/:id`. In real use, point `TWIN_URL` at your own app instead. |
-| `shield/` | Express + http-proxy-middleware reverse proxy — inspects every request and blocks detected attack patterns before forwarding to `TWIN_URL`. |
-| `attacker/` | Node script using the OpenAI API — generates and fires attack payloads across 10 categories against the shield. |
-| `orchestrator/` | Shared TypeScript types (`AttackEvent`, `RunSummary`) and in-memory run store used by the shield and dashboard. |
-| `dashboard/` | Next.js 14 (App Router, TypeScript, Tailwind) — live-run page showing every hit and block in real time. Deployable to Vercel; shows a bundled recorded run by default (`DEMO_MODE=true`). |
-| `rules/memory/` | Semgrep rules. `SEC-001.yaml` flags `getKit()` calls that skip the owner check. |
+| Tool | Role in Security Twin |
+|------|----------------------|
+| **OpenAI / Nebius** | LLM attacker (attack stage) and run summariser (brief stage) |
+| **Semgrep** | Static analysis baseline (scan) + confirmation (confirm) + memory rule enforcement in CI (twin-gate) |
+| **ClickHouse** | Time-series store for every shield request; IDOR enumeration detected by SQL window query |
+| **MongoDB** | Persistent memory — stores each confirmed finding, attacker confession, fix invariant |
+| **Guava** | Outbound voice call to on-call engineer; collects yes/no fix approval (alert stage) |
+| **ElevenLabs** | Text-to-speech audio brief from the LLM run summary (brief stage) |
+| **GitHub REST API** | Creates branch, commits patched file + memory rule + CI workflow, opens PR (sync stage) |
+
+---
+
+## Safety design
+
+Security Twin is built to test a **clone**, never your production system.
+
+| Principle | Implementation |
+|-----------|---------------|
+| **Twin banner** | `demo-app` renders a fixed amber banner. If you point `TWIN_URL` at your own app, keep this visual indicator so it's clear which instance is under attack. |
+| **Attack only the twin** | The attacker fires at `SHIELD_URL` (default `:8080`), never directly at your app. The shield proxies to `TWIN_URL`. |
+| **Passive shield** | The shield detects and counts attacks but does not alter your production data. It injects decoy responses to mislead the attacker, not to disrupt real users. |
+| **Careful fix** | The fix stage analyses blast radius (callers of the unsafe function) before patching. A signature change with high blast radius triggers a human decision gate that pauses the pipeline. |
+| **PR-only sync** | The sync stage opens a pull request on your fork — it never force-pushes or touches `main` directly. The `GITHUB_TOKEN` is scoped to the fork only. |
+| **Env isolation** | `.env.local` and all `.env*` variants are git-ignored. The `_private/` folder is also git-ignored. No secret is ever committed. |
+| **Memory rule CI gate** | Once a vulnerability class is patched, its Semgrep rule is committed and wired into `twin-gate.yml`. Every future PR runs the gate — the same pattern can never re-enter the codebase. |
+| **Phone alert optional** | The Guava alert stage is gated by `PHONE_ALERTS=true`. A failed or skipped call never blocks the pipeline. |
 
 ---
 
 ## Prerequisites
 
 - Node 20+
-- An `OPENAI_API_KEY` in `.env.local` (copy `.env.example` → `.env.local`)
+- `.env.local` at the repo root (copy `.env.example` → `.env.local`)
+
+**Minimum keys for a live run:**
+
+```
+OPENAI_API_KEY=          # or set NEBIUS_API_KEY + NEBIUS_BASE_URL
+CLICKHOUSE_HOST=
+CLICKHOUSE_USER=
+CLICKHOUSE_PASSWORD=
+MONGODB_URI=
+GITHUB_TOKEN=            # scoped to your fork only
+GITHUB_FORK=owner/repo
+```
+
+**Optional — each feature degrades gracefully without it:**
+
+```
+ELEVENLABS_API_KEY=      # audio brief
+ELEVENLABS_VOICE_ID=
+PHONE_ALERTS=true        # Guava voice alert
+ON_CALL_NUMBER=+1...
+GUAVA_API_KEY=
+GUAVA_AGENT_NUMBER=
+RECORD_DEMO_RUN=true     # overwrite demo-run.json after a real run
+```
 
 ---
 
-## Quickstart — full local demo
+## Quickstart — demo mode (no keys required)
 
 ```bash
-# 1. Start the sample target app (port 3000)
-cd demo-app && npm install && npm run dev
-
-# 2. Start the shield (port 4000), proxying to the target
-cd ../shield && npm install
-TWIN_URL=http://localhost:3000 npm run dev
-
-# 3. Fire attack payloads through the shield
-cd ../attacker && npm install
-SHIELD_URL=http://localhost:4000 npm run dev
-
-# 4. Watch results in the dashboard (port 3002)
-cd ../dashboard && npm install && npm run dev
+bash _private/demo-start.sh
+# Opens http://localhost:3001
+# Replays dashboard/public/demo-run.json — no backend, no attacker
 ```
 
-Open `http://localhost:3002` — the dashboard streams every blocked and passed event.
+---
+
+## Quickstart — full local run
+
+```bash
+# 1. Copy and fill env
+cp .env.example .env.local
+
+# 2. Start all services (demo-app :3000, shield :8080, orchestrator :4001, dashboard :3001)
+bash scripts/start-all.sh
+
+# 3. Trigger a live pipeline run
+bash scripts/demo.sh --live
+
+# 4. Stop everything
+bash scripts/stop-all.sh
+```
+
+---
+
+## Recording a real run as the new demo
+
+Set `RECORD_DEMO_RUN=true`. When the pipeline finishes, the full event stream is written to `dashboard/public/demo-run.json` and replayed automatically in demo mode.
+
+```bash
+RECORD_DEMO_RUN=true bash scripts/demo.sh --live
+```
 
 ---
 
 ## Running each piece individually
 
-### demo-app (sample target)
+### demo-app (port 3000)
 
 ```bash
-cd demo-app
-npm install
-npm run dev        # ts-node, port 3000
-# or: npm run build && npm start
+cd demo-app && npm install
+PORT=3000 npx ts-node src/index.ts
 ```
+
+Intentional IDOR on `GET /api/kits/:id` — the planted vulnerability the twin finds. The three users are `alice`, `bob`, `carol` (set via `x-demo-user` header). After SEC-001 is patched the route uses `getKitForUser(id, currentUser(req))`.
+
+### shield (port 8080)
 
 ```bash
-# Test the IDOR vulnerability — alice reads bob's kit
-curl -H "x-demo-user: alice" http://localhost:3000/api/kits/kit-bob-1
+cd shield && npm install
+SHIELD_PORT=8080 TWIN_URL=http://localhost:3000 npx ts-node src/index.ts
 ```
-
-```bash
-# Test the health check
-curl http://localhost:3000/healthz
-```
-
-Docker:
-```bash
-docker build -t security-twin/demo-app demo-app/
-docker run -p 3000:3000 security-twin/demo-app
-```
-
-### shield (reverse proxy)
-
-```bash
-cd shield
-npm install
-# Set TWIN_URL to the app you want to proxy (default: http://localhost:3000)
-npm run dev        # ts-node
-# or: npm run build && npm start
-```
-
-Default port: **4000**. Point `TWIN_URL` at your own app to use it as the real target.
 
 ### attacker
 
 ```bash
-cd attacker
-npm install
-# Set SHIELD_URL (default http://localhost:4000) and OPENAI_API_KEY
-npm run dev
+cd attacker && npm install
+SHIELD_URL=http://localhost:8080 npx ts-node agent.ts
 ```
 
-Fires one round of payloads for each of 10 attack categories, then exits.
+Requires `OPENAI_API_KEY` or Nebius credentials.
 
-### orchestrator (build-time library)
+### orchestrator (port 4001)
 
 ```bash
-cd orchestrator
-npm install
-npm run build      # outputs to dist/
+cd orchestrator && npm install   # .npmrc sets legacy-peer-deps automatically
+PORT=4001 REPO_ROOT=$(pwd)/.. npx ts-node src/server.ts
 ```
 
-Consumed as a local TypeScript path reference by the shield and dashboard.
+`POST /run/start` starts the 13-stage pipeline. `GET /api/runs/:id/stream` streams SSE events.
 
-### dashboard
+### dashboard (port 3001)
 
 ```bash
-cd dashboard
-npm install
-npm run dev        # http://localhost:3002
+cd dashboard && npm install
+DEMO_MODE=false ORCHESTRATOR_URL=http://localhost:4001 npx next dev -p 3001
 ```
 
-`DEMO_MODE=true` (the default) shows the bundled `public/demo-run.json`.
-Set `DEMO_MODE=false` and `DASHBOARD_UNLOCK=<secret>` to enable the
-"Launch live attack" button.
+Live run page at `/runs/:id`. Memory page at `/memory`. Set `DEMO_MODE=true` to replay `public/demo-run.json` without a backend.
 
 ---
 
-## Deploy to Vercel
+## Vercel deployment
 
-The `dashboard/` folder is a self-contained Next.js app.
+Deploy the dashboard to Vercel with **root directory = `dashboard/`**.
 
-1. **Add New Project** in Vercel → import this repo → **Root Directory = `dashboard`**.
-2. Vercel auto-detects Next.js; `dashboard/vercel.json` sets defaults.
-3. Set these environment variables:
+| Vercel env var | Value |
+|----------------|-------|
+| `ORCHESTRATOR_URL` | `https://your-orchestrator.example.com` |
+| `DEMO_MODE` | `true` for the public demo replay |
 
-| Variable | Description |
-|----------|-------------|
-| `DEMO_MODE` | `true` for public visitors (recorded run only) |
-| `DASHBOARD_UNLOCK` | Secret required to trigger a live run (leave blank for public deploy) |
-| `SHIELD_URL` | URL of your running shield |
-| `ORCHESTRATOR_URL` | URL of your running orchestrator |
-
-> **Note:** The shield, attacker, orchestrator, and demo-app are long-running
-> processes that cannot run on Vercel. Host them on Akash Network or locally
-> and expose via a tunnel (e.g. ngrok, Cloudflare Tunnel).
+The dashboard is stateless. In `DEMO_MODE` it replays the bundled JSON with no backend.
 
 ---
 
-## Semgrep rules
+## Twin Gate — CI enforcement
+
+`.github/workflows/twin-gate.yml` runs on every pull request via the `semgrep/semgrep` Docker image:
+
+| Step | Blocking? | Detail |
+|------|-----------|--------|
+| Semgrep auto | No | `--config auto` on `demo-app/src/` — findings become PR annotations |
+| Semgrep memory | **Yes** | `--config rules/memory/` — zero tolerance, PR fails with SEC-001 link |
+| Plumber | No | `plumber scan . --min-score B` — skipped with a warning if binary absent |
+
+**To demo the gate live:**
 
 ```bash
-# Flag IDOR — getKit() calls that skip the owner check
-semgrep --config rules/memory/SEC-001.yaml demo-app/src/
+git remote add origin https://github.com/YOUR_FORK/security-twin.git
+git push origin master
+git push origin demo/idor-regression
+# open PR: demo/idor-regression → master
+# twin-gate/Semgrep memory rules will FAIL and annotate the export endpoint
 ```
 
----
-
-## Private folder
-
-`_private/` is git-ignored and safe for PDD images, notes, and local files.
+The `demo/idor-regression` branch adds `GET /api/kits/:id/export` which calls `getKit(id)` without an owner check — the exact pattern SEC-001 forbids.
 
 ---
 
-## Environment variables
+## Memory rule format
 
-Copy `.env.example` to `.env.local` and fill in values. Never commit `.env.local`.
+```yaml
+# rules/memory/SEC-001.yaml
+rules:
+  - id: SEC-001-idor-getkit-no-owner-check
+    message: >
+      getKit(id) returns a kit with NO owner check — IDOR / CWE-639 / OWASP A01.
+      Fix: replace with getKitForUser(id, currentUser(req)).
+    severity: ERROR
+    languages: [typescript, javascript]
+    patterns:
+      - pattern: getKit($ID)
+      - pattern-not: getKit($ID, ...)
+```
+
+The `sync` stage commits this rule, the patched source, and `twin-gate.yml` to your fork as a single PR. Once merged, the invariant is enforced on every future PR automatically.
+
+---
+
+## Architecture images
+
+<!-- Drop images from _private/ here -->
+
+---
+
+## License
+
+MIT
