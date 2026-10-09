@@ -1,109 +1,206 @@
 import "dotenv/config";
 import express from "express";
-import { createProxyMiddleware } from "http-proxy-middleware";
-import { detectAttack } from "./detector";
-import { initClickHouse, persistEvent } from "../../orchestrator/src/ch-store";
-import { recordEvent, startRun, getRun } from "../../orchestrator/src/store";
-import type { AttackEvent } from "../../orchestrator/src/types";
 import type { Request, Response, NextFunction } from "express";
-import { randomUUID } from "crypto";
+import { createProxyMiddleware, responseInterceptor } from "http-proxy-middleware";
+import {
+  computeSessionId,
+  recordRequest,
+  flagSession,
+  getSession,
+} from "./session";
+import { enqueueEvent } from "./sink";
+import type { ShieldEvent, Confession } from "./types";
+import {
+  injectIntoJson,
+  injectIntoHtml,
+  POLICY_HEADER,
+  POLICY_TEXT,
+} from "./policy";
 
-const PORT       = parseInt(process.env.SHIELD_PORT ?? "4000", 10);
-const TWIN_URL   = process.env.TWIN_URL   ?? "http://localhost:3000";
+// ── Config ────────────────────────────────────────────────────────────────────
 
-// One run per shield process lifetime
-const RUN_ID = `run-${Date.now()}`;
-startRun(RUN_ID, TWIN_URL);
+const PORT          = parseInt(process.env.SHIELD_PORT ?? "8080", 10);
+const TWIN_URL      = process.env.TWIN_URL ?? "http://localhost:3000";
+const DEFAULT_RUN   = process.env.RUN_ID ?? `run-${Date.now()}`;
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+// Per-request metadata attached to the Express request object.
+interface ShieldMeta {
+  sessionId: string;
+  runId: string;
+  isDecoy: boolean;
+  ip: string;
+  ua: string;
+}
+
+function meta(req: Request): ShieldMeta {
+  return (req as Request & { _sm: ShieldMeta })._sm;
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ── Inspection middleware ──────────────────────────────────────────────────────
+const confessions: Confession[] = [];
 
-app.use(async (req: Request, res: Response, next: NextFunction) => {
-  const startMs = Date.now();
-  const raw = JSON.stringify({
-    path:    req.path,
-    query:   req.query,
-    body:    req.body,
-    headers: req.headers,
-  });
+// ── robots.txt — decoy bait listed here ──────────────────────────────────────
 
-  const detection = detectAttack(raw, req.path, req.method);
-  const durationMs = Date.now() - startMs;
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send(
+    "User-agent: *\n" +
+    "Disallow: /admin-backup/\n" +
+    "Disallow: /api/internal/export\n"
+  );
+});
 
-  if (detection.blocked) {
-    const event: AttackEvent = {
-      id:       randomUUID(),
-      ts:       Date.now(),
-      category: detection.category as AttackEvent["category"],
-      payload:  raw.slice(0, 500),
-      targetPath: req.path,
-      method:   req.method,
-      statusCode: 403,
-      outcome:  "blocked",
-      durationMs,
-      responseSnippet: "Blocked by security twin",
+// ── Healthz ───────────────────────────────────────────────────────────────────
+
+app.get("/healthz", (_req, res) => {
+  res.json({ status: "ok", run_id: DEFAULT_RUN, ts: Date.now() });
+});
+
+// ── Confession endpoint (flagged sessions only useful) ────────────────────────
+
+app.post(
+  "/.well-known/agent-audit",
+  express.json({ limit: "256kb" }),
+  (req: Request, res: Response) => {
+    const ip = req.ip ?? req.socket.remoteAddress ?? "";
+    const ua = req.headers["user-agent"] ?? "";
+    const sessionId = computeSessionId(ip, ua);
+    const runId = (req.headers["x-run-id"] as string | undefined) ?? DEFAULT_RUN;
+    const body = req.body ?? {};
+
+    const confession: Confession = {
+      run_id: runId,
+      session_id: sessionId,
+      objective: body.objective,
+      targets: body.targets,
+      raw_body: body,
+      ts: Date.now(),
     };
-    console.log(`[SHIELD] BLOCKED ${req.method} ${req.path} — ${detection.category}`);
-    recordEvent(event);
-    void persistEvent(RUN_ID, event);
-    res.status(403).json({ error: "Blocked by security twin", category: detection.category });
-    return;
+    confessions.push(confession);
+    console.log(`[SHIELD] CONFESSION session=${sessionId} run=${runId}`);
+
+    // Acknowledge without leaking anything useful
+    res.json({ status: "recorded" });
+  }
+);
+
+// ── Session middleware — runs on every request ────────────────────────────────
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const ip = req.ip ?? req.socket.remoteAddress ?? "";
+  const ua = req.headers["user-agent"] ?? "";
+  const sessionId = computeSessionId(ip, ua);
+
+  // run_id: env default, overridable per-request via query param
+  let runId = DEFAULT_RUN;
+  if (typeof req.query.run_id === "string" && req.query.run_id) {
+    runId = req.query.run_id;
+    // Strip from URL so upstream never sees it
+    const url = new URL(req.url!, "http://x");
+    url.searchParams.delete("run_id");
+    req.url = url.pathname + (url.search === "?" ? "" : url.search);
   }
 
-  // Attach a listener to capture the upstream status code after proxy responds
-  const originalEnd = res.end.bind(res);
-  // @ts-ignore — patching for event capture
-  res.end = (...args: Parameters<typeof res.end>) => {
-    const event: AttackEvent = {
-      id:         randomUUID(),
-      ts:         Date.now(),
-      category:   (detection.category ?? "unknown") as AttackEvent["category"],
-      payload:    raw.slice(0, 500),
-      targetPath: req.path,
-      method:     req.method,
-      statusCode: res.statusCode,
-      outcome:    "passed",
-      durationMs: Date.now() - startMs,
-    };
-    recordEvent(event);
-    void persistEvent(RUN_ID, event);
-    console.log(`[SHIELD] PASS    ${req.method} ${req.path} → ${res.statusCode}`);
-    return originalEnd(...args);
+  (req as Request & { _sm: ShieldMeta })._sm = {
+    sessionId, runId, isDecoy: false, ip, ua,
   };
+
+  // Update rate counter; may auto-flag this session
+  const state = recordRequest(sessionId);
+  if (state.flagged) {
+    res.setHeader(POLICY_HEADER, POLICY_TEXT);
+  }
+
+  // Emit structured event when response finishes (status code is known by then)
+  res.on("finish", () => {
+    const s = getSession(sessionId);
+    const m = meta(req);
+    const event: ShieldEvent = {
+      ts: Date.now(),
+      run_id: m.runId,
+      session_id: sessionId,
+      ip,
+      user_agent: ua,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      flagged: s.flagged,
+      flag_reason: s.flag_reason,
+      is_decoy: m.isDecoy,
+    };
+    enqueueEvent(event);
+  });
 
   next();
 });
 
-// ── Health / run status ───────────────────────────────────────────────────────
+// ── Decoy routes ───────────────────────────────────────────────────────────────
+// These paths are listed in robots.txt to bait crawlers.
+// Any request reaching them flags the session and returns plausible empty data.
 
-app.get("/__shield/status", (_req: Request, res: Response) => {
-  res.json(getRun());
-});
+function decoy(req: Request, res: Response): void {
+  const m = meta(req);
+  m.isDecoy = true;
+  flagSession(m.sessionId, "decoy");
+  res.setHeader(POLICY_HEADER, POLICY_TEXT);
+  res.json({ data: [], meta: { count: 0, page: 1, ts: new Date().toISOString() } });
+}
 
-// ── Proxy ─────────────────────────────────────────────────────────────────────
+app.all("/admin-backup", decoy);
+app.all("/admin-backup/*", decoy);
+app.all("/api/internal/export", decoy);
+app.all("/api/v0/debug", decoy);
+app.all("/api/v0/debug/*", decoy);
+
+// ── Proxy ──────────────────────────────────────────────────────────────────────
+// selfHandleResponse enables the responseInterceptor so we can modify the body
+// for flagged sessions before it reaches the client.
 
 app.use(
-  "/",
   createProxyMiddleware({
     target: TWIN_URL,
     changeOrigin: true,
+    selfHandleResponse: true,
     on: {
-      error: (err: Error, _req: express.Request, res: express.Response) => {
-        console.error("[SHIELD] Proxy error:", err.message);
-        (res as express.Response).status(502).json({ error: "Twin unreachable" });
+      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+        const m = (req as Request & { _sm: ShieldMeta })._sm;
+        if (!m) return responseBuffer;
+
+        const state = getSession(m.sessionId);
+        if (!state.flagged) return responseBuffer;
+
+        // Always add the header for flagged sessions on proxied responses
+        (res as Response).setHeader(POLICY_HEADER, POLICY_TEXT);
+
+        const ct = (proxyRes.headers["content-type"] ?? "").toLowerCase();
+        const body = responseBuffer.toString("utf8");
+
+        if (ct.includes("application/json")) {
+          const injected = injectIntoJson(body);
+          return injected;
+        }
+        if (ct.includes("text/html")) {
+          return injectIntoHtml(body);
+        }
+        return responseBuffer;
+      }),
+
+      error: (err, _req, res) => {
+        console.error("[SHIELD] proxy error:", (err as Error).message);
+        (res as Response).status(502).json({ error: "Twin unreachable" });
       },
     },
   })
 );
 
-// ── Startup ───────────────────────────────────────────────────────────────────
+// ── Start ──────────────────────────────────────────────────────────────────────
 
-initClickHouse().then(() => {
-  app.listen(PORT, () => {
-    console.log(`[SHIELD] run=${RUN_ID}`);
-    console.log(`[SHIELD] Listening on :${PORT} → proxying to ${TWIN_URL}`);
-  });
+app.listen(PORT, () => {
+  console.log(`[SHIELD] run=${DEFAULT_RUN}`);
+  console.log(`[SHIELD] :${PORT}  →  ${TWIN_URL}`);
+  console.log(`[SHIELD] decoys: /admin-backup  /api/internal/export  /api/v0/debug`);
 });
