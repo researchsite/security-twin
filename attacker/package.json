@@ -5,15 +5,20 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "agent": "ts-node src/agent.ts",
+    "agent:dry": "ts-node src/agent.ts --dry",
+    "agent:record": "ts-node src/agent.ts --record",
+    "traffic": "ts-node src/traffic.ts",
+    "traffic:fast": "ts-node src/traffic.ts --rate 5000 --seconds 30"
   },
   "dependencies": {
-    "openai": "^4.52.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "openai": "^7.31.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.4.0",
-    "ts-node": "^10.9.0"
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
   }
 }

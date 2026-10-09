@@ -42,6 +42,10 @@ function meta(req: Request): ShieldMeta {
 
 const app = express();
 
+// Trust X-Forwarded-For so traffic.ts fake IPs generate distinct session IDs.
+// In production you'd scope this to a specific upstream IP count.
+app.set("trust proxy", true);
+
 const confessions: Confession[] = [];
 
 // ── robots.txt — decoy bait listed here ──────────────────────────────────────

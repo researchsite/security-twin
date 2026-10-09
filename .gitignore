@@ -20,6 +20,9 @@ dist/
 build/
 out/
 
+# ── Attacker recordings (real run data, may contain findings) ─────────────────
+attacker/recordings/*.json
+
 # ── Python venvs ──────────────────────────────────────────────────────────────
 .venv/
 venv/

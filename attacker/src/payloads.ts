@@ -1,5 +1,9 @@
 import OpenAI from "openai";
-import type { AttackCategory } from "../../orchestrator/src/types";
+
+// Locally-defined to keep attacker self-contained (mirrors orchestrator/src/types.ts).
+export type AttackCategory =
+  | "sql_injection" | "xss" | "path_traversal" | "idor" | "auth_bypass"
+  | "ssrf" | "command_injection" | "header_injection" | "open_redirect" | "mass_assignment";
 
 const STATIC_PAYLOADS: Record<AttackCategory, string[]> = {
   sql_injection: ["' OR '1'='1", "'; DROP TABLE users; --", "1 UNION SELECT null,null--"],

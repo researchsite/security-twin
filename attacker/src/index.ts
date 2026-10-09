@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { buildNebiusClient, generatePayloads } from "./payloads";
-import type { AttackCategory } from "../../orchestrator/src/types";
+import type { AttackCategory } from "./payloads";
 
 const SHIELD_URL = process.env.SHIELD_URL ?? "http://localhost:4000";
 const TARGET_PATHS = ["/api/kits", "/api/process", "/api/user", "/search", "/health"];
