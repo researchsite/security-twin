@@ -4,19 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "reset":           "node reset-run.mjs",
-    "reset:run":       "node reset-run.mjs --run-id",
-    "test:all":        "node test-all.mjs",
+    "reset": "node reset-run.mjs",
+    "reset:run": "node reset-run.mjs --run-id",
+    "test:all": "node test-all.mjs",
     "test:clickhouse": "node test-clickhouse.mjs",
-    "test:mongodb":    "node test-mongodb.mjs",
-    "test:nebius":     "node test-nebius.mjs",
-    "test:github":     "node test-github.mjs",
-    "check:akash":    "node check-akash.mjs"
+    "test:mongodb": "node test-mongodb.mjs",
+    "test:nebius": "node test-nebius.mjs",
+    "test:github": "node test-github.mjs",
+    "check:akash": "node check-akash.mjs",
+    "make:video": "node make-video.mjs",
+    "make:video:tts": "node make-video.mjs --no-ffmpeg"
   },
   "dependencies": {
     "@clickhouse/client": "^1.8.0",
-    "@octokit/rest":      "^21.0.0",
-    "mongodb":            "^6.8.0",
-    "openai":             "^4.52.0"
+    "@octokit/rest": "^21.0.0",
+    "mongodb": "^6.8.0",
+    "openai": "^4.52.0"
+  },
+  "devDependencies": {
+    "puppeteer": "^25.13.0"
   }
 }

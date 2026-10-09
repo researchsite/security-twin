@@ -24,20 +24,32 @@ Security teams patch a vulnerability and move on. Two months later a new endpoin
 
 ## Screenshots
 
-### Dashboard — live run page
-![Dashboard run page with 13 stages](docs/screenshots/run-page-final.png)
+### 1 — Target app: Kit Store (the planted IDOR)
+![Target app Kit Store with amber Security Twin banner](docs/screenshots/01-target-app-idor-bug.png)
 
-### Dashboard — home
-![Security Twin dashboard home](docs/screenshots/dashboard-home.png)
+### 2 — Dashboard home
+![Security Twin dashboard home](docs/screenshots/02-dashboard-home.png)
 
-### Target app — Kit Store (the demo IDOR target)
-![Demo app Kit Store showing alice's kits with amber twin banner](docs/screenshots/demo-app-home.png)
+### 3 — Pipeline: all 13 stages
+![All 13 pipeline stages listed in the dashboard sidebar](docs/screenshots/03-pipeline-all-13-stages.png)
 
-### Live attacker feed — AkashML / Llama-3.3 attacking through the shield
-![Live run attack stage showing LLM HTTP requests](docs/screenshots/live-run-attack-stage.png)
+### 4 — Stage 3: AkashML / Llama-3.3-70B attack
+![Stage 3 LLM attack using AkashML Llama 3.3 70B](docs/screenshots/04-attack-akashml-llama.png)
 
-### All 13 stages complete
-![All 13 pipeline stages shown in dashboard](docs/screenshots/run-all-13-stages.png)
+> AkashML `meta-llama/Llama-3.3-70B-Instruct` fires IDOR payloads through the shield proxy.
+> Alice reads kit-3, owned by Bob — confirmed IDOR exploit in 2,106ms.
+
+### 5 — All stages running
+![All 13 stages progressing in the dashboard](docs/screenshots/05-all-stages-running.png)
+
+### 6 — Stage 5: ClickHouse detects in 118ms
+![ClickHouse detection query result — 118ms, 5 IPs flagged](docs/screenshots/06-clickhouse-118ms-detect.png)
+
+### 7 — Stage 9: blast-radius fix applied
+![Fix stage showing non-breaking ownership guard applied](docs/screenshots/07-fix-blast-radius.png)
+
+### 8 — All 13 stages complete in 29 seconds
+![Run complete — all 13 stages green, 29 seconds total](docs/screenshots/08-run-complete-29s.png)
 
 ---
 
