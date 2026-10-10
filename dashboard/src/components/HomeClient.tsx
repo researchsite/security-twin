@@ -12,7 +12,7 @@ interface Props {
 export function HomeClient({ demoMode, demoRunId }: Props) {
   const router = useRouter();
   const [repoUrl, setRepoUrl] = useState(
-    demoMode ? "https://github.com/security-twin/demo-app" : ""
+    demoMode ? "https://github.com/researchsite/security-twin/tree/master/demo-app" : ""
   );
   const [unlockKey, setUnlockKey] = useState("");
   const [loading, setLoading] = useState(false);
